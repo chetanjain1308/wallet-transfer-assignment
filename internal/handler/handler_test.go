@@ -289,3 +289,40 @@ func decodeBody(t *testing.T, response *httptest.ResponseRecorder, target any) {
 		t.Fatalf("decode response %q: %v", response.Body, err)
 	}
 }
+
+// json.Decoder stops after one value, so a body with a second object or trailing
+// garbage would otherwise be accepted and the transfer executed.
+func TestTrailingDataAfterTheJSONBodyIsRejected(t *testing.T) {
+	t.Parallel()
+
+	api, h := newAPI(t)
+	source := h.Wallet("USD", 1_000)
+	destination := h.Wallet("USD", 0)
+
+	valid := fmt.Sprintf(
+		`{"idempotencyKey":%q,"fromWalletId":%q,"toWalletId":%q,"amount":100}`,
+		testsupport.Key(), source, destination,
+	)
+
+	bodies := map[string]string{
+		"second object":    valid + valid,
+		"trailing garbage": valid + " nonsense",
+	}
+
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/transfers", bytes.NewBufferString(body))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			api.ServeHTTP(response, request)
+
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", response.Code, response.Body)
+			}
+		})
+	}
+
+	if got := h.Balance(source); got != 1_000 {
+		t.Errorf("source balance = %d, want 1000 — a rejected body moved money", got)
+	}
+}

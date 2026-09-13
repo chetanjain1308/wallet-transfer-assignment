@@ -10,6 +10,7 @@ type FailureCode string
 const (
 	FailureInsufficientFunds FailureCode = "INSUFFICIENT_FUNDS"
 	FailureCurrencyMismatch  FailureCode = "CURRENCY_MISMATCH"
+	FailureBalanceOverflow   FailureCode = "BALANCE_OVERFLOW"
 )
 
 // Err returns the error a failure code stands for.
@@ -17,6 +18,8 @@ func (c FailureCode) Err() error {
 	switch c {
 	case FailureInsufficientFunds:
 		return ErrInsufficientFunds
+	case FailureBalanceOverflow:
+		return ErrBalanceOverflow
 	case FailureCurrencyMismatch:
 		return ErrCurrencyMismatch
 	default:
@@ -30,6 +33,8 @@ func FailureCodeFor(err error) (FailureCode, bool) {
 	switch {
 	case errors.Is(err, ErrInsufficientFunds):
 		return FailureInsufficientFunds, true
+	case errors.Is(err, ErrBalanceOverflow):
+		return FailureBalanceOverflow, true
 	case errors.Is(err, ErrCurrencyMismatch):
 		return FailureCurrencyMismatch, true
 	default:

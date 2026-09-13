@@ -5,6 +5,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -141,6 +142,11 @@ func decode(w http.ResponseWriter, r *http.Request, target any) error {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return errors.Join(errMalformedBody, err)
+	}
+	// Decode stops after one value, so without this a second object or trailing
+	// garbage would be ignored and the request executed anyway.
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.Join(errMalformedBody, errTrailingData)
 	}
 	return nil
 }

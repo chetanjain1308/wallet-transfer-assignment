@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/Robustrade/wallet-transfer-assignment/internal/domain"
@@ -245,5 +246,85 @@ func TestInvalidRequestsAreRejectedBeforeAnyWrite(t *testing.T) {
 				t.Errorf("Transfer() = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+// Wallet ids are unrestricted text, so joining fields with a separator is not
+// injective. These two requests both render as "a|b|c|1" under "from|to|amount",
+// so the second would replay the first's transfer instead of being refused.
+func TestKeyReuseIsCaughtWhenWalletIdsContainTheSeparator(t *testing.T) {
+	t.Parallel()
+
+	h := testsupport.New(t)
+	transfers := service.NewTransferService(h.Store, testsupport.Logger())
+
+	prefix := testsupport.Key()
+	a, b, c := prefix+"_a", prefix+"_b", prefix+"_c"
+
+	from1 := h.WalletNamed(a, "USD", 1_000)
+	to1 := h.WalletNamed(b+"|"+c, "USD", 0)
+	from2 := h.WalletNamed(a+"|"+b, "USD", 1_000)
+	to2 := h.WalletNamed(c, "USD", 0)
+
+	key := testsupport.Key()
+	if _, err := transfers.Transfer(context.Background(), domain.TransferRequest{
+		IdempotencyKey: key,
+		FromWalletID:   from1,
+		ToWalletID:     to1,
+		Amount:         1,
+	}); err != nil {
+		t.Fatalf("first Transfer() = %v", err)
+	}
+
+	_, err := transfers.Transfer(context.Background(), domain.TransferRequest{
+		IdempotencyKey: key,
+		FromWalletID:   from2,
+		ToWalletID:     to2,
+		Amount:         1,
+	})
+	if !errors.Is(err, domain.ErrIdempotencyKeyReuse) {
+		t.Fatalf("Transfer() = %v, want ErrIdempotencyKeyReuse; the fingerprint collided", err)
+	}
+	if got := h.Balance(from2); got != 1_000 {
+		t.Errorf("second source balance = %d, want 1000", got)
+	}
+	if got := h.TransferCountForKey(key); got != 1 {
+		t.Errorf("transfers for the key = %d, want 1", got)
+	}
+}
+
+// The balance column is BIGINT. A credit that would overflow it has to be a
+// decision about the money, not an aborted transaction surfacing as a 500.
+func TestCreditThatWouldOverflowIsRecordedAsFailed(t *testing.T) {
+	t.Parallel()
+
+	h := testsupport.New(t)
+	transfers := service.NewTransferService(h.Store, testsupport.Logger())
+	source := h.Wallet("USD", 1_000)
+	destination := h.Wallet("USD", math.MaxInt64)
+
+	result, err := transfers.Transfer(context.Background(), domain.TransferRequest{
+		IdempotencyKey: testsupport.Key(),
+		FromWalletID:   source,
+		ToWalletID:     destination,
+		Amount:         1,
+	})
+	if err != nil {
+		t.Fatalf("Transfer() = %v, want a recorded failure rather than an error", err)
+	}
+	if !errors.Is(result.Failure, domain.ErrBalanceOverflow) {
+		t.Fatalf("failure = %v, want ErrBalanceOverflow", result.Failure)
+	}
+	if result.Transfer.Status != domain.StatusFailed {
+		t.Errorf("status = %q, want FAILED", result.Transfer.Status)
+	}
+	if got := h.Balance(source); got != 1_000 {
+		t.Errorf("source balance = %d, want 1000", got)
+	}
+	if got := h.Balance(destination); got != math.MaxInt64 {
+		t.Errorf("destination balance moved, want it untouched")
+	}
+	if got := h.EntryCount(result.Transfer.ID); got != 0 {
+		t.Errorf("ledger entries = %d, want 0", got)
 	}
 }

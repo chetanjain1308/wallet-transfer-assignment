@@ -4,7 +4,6 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver
@@ -77,11 +76,11 @@ func (s *Store) Atomic(ctx context.Context, fn func(context.Context, service.Tx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
+	// Unconditional, so a panic inside fn cannot leave the transaction open and
+	// its pool connection pinned. Rollback after a successful commit is a no-op.
+	defer func() { _ = tx.Rollback() }()
 
 	if err := fn(ctx, &Tx{tx: tx}); err != nil {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
-			return errors.Join(err, fmt.Errorf("rollback: %w", rollbackErr))
-		}
 		return err
 	}
 

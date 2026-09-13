@@ -81,14 +81,21 @@ func Logger() *slog.Logger {
 func (h *Harness) Wallet(currency string, balance int64) string {
 	h.t.Helper()
 
-	id := fmt.Sprintf("wallet_%s", uuid.NewString())
+	return h.WalletNamed(fmt.Sprintf("wallet_%s", uuid.NewString()), currency, balance)
+}
+
+// WalletNamed creates a wallet under an id the caller chooses, for tests that
+// care what the id looks like.
+func (h *Harness) WalletNamed(id, currency string, balance int64) string {
+	h.t.Helper()
+
 	err := h.Store.CreateWallet(context.Background(), domain.Wallet{
 		ID:       id,
 		Currency: currency,
 		Balance:  balance,
 	})
 	if err != nil {
-		h.t.Fatalf("create wallet: %v", err)
+		h.t.Fatalf("create wallet %q: %v", id, err)
 	}
 	return id
 }

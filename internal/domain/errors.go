@@ -17,6 +17,7 @@ var (
 var (
 	ErrInsufficientFunds = errors.New("insufficient funds")
 	ErrCurrencyMismatch  = errors.New("wallets hold different currencies")
+	ErrBalanceOverflow   = errors.New("credit would overflow the destination balance")
 )
 
 // ErrIdempotencyKeyReuse is returned when a key is replayed with a different

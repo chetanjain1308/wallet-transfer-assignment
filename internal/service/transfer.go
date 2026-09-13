@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
+	"math"
 
 	"github.com/Robustrade/wallet-transfer-assignment/internal/domain"
 )
@@ -181,14 +183,30 @@ func failureFor(source, destination domain.Wallet, amount int64) (domain.Failure
 	if !source.CanDebit(amount) {
 		return domain.FailureInsufficientFunds, true
 	}
+	// The balance column is BIGINT. Without this the credit would abort the
+	// transaction on an integer overflow and surface as an internal error rather
+	// than a decision about the money.
+	if destination.Balance > math.MaxInt64-amount {
+		return domain.FailureBalanceOverflow, true
+	}
 	return "", false
 }
 
-// fingerprintOf identifies the request a key was first used for, so that reusing a
-// key on different terms is caught instead of silently returning the wrong
+// fingerprintOf identifies the request a key was first used for, so that reusing
+// a key on different terms is caught instead of silently returning the wrong
 // transfer.
+//
+// Fields are length-prefixed rather than delimiter-joined. Wallet ids are
+// unrestricted text, so a separator alone is not injective: ("a", "b|1") and
+// ("a|b", "1") would otherwise hash alike and a reuse would replay as a match.
 func fingerprintOf(req domain.TransferRequest) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d",
-		req.FromWalletID, req.ToWalletID, req.Amount)))
-	return hex.EncodeToString(sum[:])
+	sum := sha256.New()
+	writeLengthPrefixed(sum, req.FromWalletID)
+	writeLengthPrefixed(sum, req.ToWalletID)
+	fmt.Fprintf(sum, "%d", req.Amount)
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+func writeLengthPrefixed(w io.Writer, field string) {
+	fmt.Fprintf(w, "%d:%s", len(field), field)
 }

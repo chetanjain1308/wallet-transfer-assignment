@@ -44,6 +44,8 @@ func statusFor(err error) (int, string) {
 	// state that refuses it, so it is unprocessable rather than malformed.
 	case errors.Is(err, domain.ErrInsufficientFunds):
 		return http.StatusUnprocessableEntity, string(domain.FailureInsufficientFunds)
+	case errors.Is(err, domain.ErrBalanceOverflow):
+		return http.StatusUnprocessableEntity, string(domain.FailureBalanceOverflow)
 	case errors.Is(err, domain.ErrCurrencyMismatch):
 		return http.StatusUnprocessableEntity, string(domain.FailureCurrencyMismatch)
 
@@ -52,4 +54,7 @@ func statusFor(err error) (int, string) {
 	}
 }
 
-var errMalformedBody = errors.New("request body is not valid JSON")
+var (
+	errMalformedBody = errors.New("request body is not valid JSON")
+	errTrailingData  = errors.New("unexpected data after the JSON body")
+)
